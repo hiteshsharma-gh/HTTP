@@ -11,14 +11,11 @@ int main() {
   // Disable output buffering
   setbuf(stdout, NULL);
 
-  // You can use print statements as follows for debugging, they'll be visible when running tests.
-  printf("Logs from your program will appear here!\n");
-
-  int server_fd, client_addr_len;
+  int server_socket, client_addr_len;
   struct sockaddr_in client_addr;
 
-  server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd == -1) {
+  server_socker = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_socket == -1) {
     printf("Socket creation failed: %s...\n", strerror(errno));
     return 1;
   }
@@ -30,18 +27,18 @@ int main() {
     return 1;
   }
 
-  struct sockaddr_in serv_addr = { .sin_family = AF_INET ,
+  struct sockaddr_in server_addr = { .sin_family = AF_INET ,
     .sin_port = htons(4221),
     .sin_addr = { htonl(INADDR_ANY) },
   };
 
-  if (bind(server_fd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) != 0) {
+  if (bind(server_socket, (struct sockaddr *) &server_addr, sizeof(server_addr)) != 0) {
     printf("Bind failed: %s \n", strerror(errno));
     return 1;
   }
 
   int connection_backlog = 5;
-  if (listen(server_fd, connection_backlog) != 0) {
+  if (listen(server_socket, connection_backlog) != 0) {
     printf("Listen failed: %s \n", strerror(errno));
     return 1;
   }
@@ -49,17 +46,25 @@ int main() {
   printf("Waiting for a client to connect...\n");
   client_addr_len = sizeof(client_addr);
 
-  int client_socket_fd = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+  int client_socket = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
   printf("Client connected\n");
 
-  char response[1000];
+  char buffer[1024];
 
-  recv(client_socket_fd, &response, sizeof(response), 0);
+  read(client_socket, buffer, sizeof(response));
   printf("request data: %s", response);
 
-  char server_message[] = "you have reached the server";
+  char *method = strtok(buffer, " ");
+  char *path = strtok(NULL, " ")
 
-  send(client_socket_fd, server_message, sizeof(server_message), 0);
+  char ok[] = "HTTP/1.1 200 OK\r\n\r\n";
+  char not_found[] = "HTTP/1.1 404 Not Found\r\n\r\n";
+
+  if(strcmp(path, "/") == 0) {
+    send(client_socket, ok, sizeof(ok), 0);
+  } else {
+    send(client_socket, not_found, sizeof(not_found), 0);
+  }
 
   close(server_fd);
 
