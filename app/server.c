@@ -22,7 +22,7 @@ int main() {
   // // Since the tester restarts your program quite often, setting REUSE_PORT
   // // ensures that we don't run into 'Address already in use' errors
   int reuse = 1;
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
+  if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) < 0) {
     printf("SO_REUSEPORT failed: %s \n", strerror(errno));
     return 1;
   }
@@ -51,8 +51,8 @@ int main() {
 
   char buffer[1024];
 
-  read(client_socket, buffer, sizeof(response));
-  printf("request data: %s", response);
+  read(client_socket, buffer, sizeof(buffer));
+  printf("request data: %s", buffer);
 
   char *method = strtok(buffer, " ");
   char *path = strtok(NULL, " ")
