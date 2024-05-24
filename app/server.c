@@ -14,7 +14,7 @@ int main() {
   int server_socket, client_addr_len;
   struct sockaddr_in client_addr;
 
-  server_socker = socket(AF_INET, SOCK_STREAM, 0);
+  server_socket = socket(AF_INET, SOCK_STREAM, 0);
   if (server_socket == -1) {
     printf("Socket creation failed: %s...\n", strerror(errno));
     return 1;
@@ -46,7 +46,7 @@ int main() {
   printf("Waiting for a client to connect...\n");
   client_addr_len = sizeof(client_addr);
 
-  int client_socket = accept(server_fd, (struct sockaddr *) &client_addr, &client_addr_len);
+  int client_socket = accept(server_socket, (struct sockaddr *) &client_addr, &client_addr_len);
   printf("Client connected\n");
 
   char buffer[1024];
@@ -55,7 +55,7 @@ int main() {
   printf("request data: %s", buffer);
 
   char *method = strtok(buffer, " ");
-  char *path = strtok(NULL, " ")
+  char *path = strtok(NULL, " ");
 
   char ok[] = "HTTP/1.1 200 OK\r\n\r\n";
   char not_found[] = "HTTP/1.1 404 Not Found\r\n\r\n";
@@ -66,7 +66,7 @@ int main() {
     send(client_socket, not_found, sizeof(not_found), 0);
   }
 
-  close(server_fd);
+  close(server_socket);
 
   return 0;
 }
