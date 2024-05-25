@@ -49,8 +49,8 @@ int main() {
   printf("Waiting for a client to connect...\n");
   client_addr_len = sizeof(client_addr);
 
-  int client_socket =
-      accept(server_socket, (struct sockaddr *)&client_addr, &client_addr_len);
+  int client_socket = accept(server_socket, (struct sockaddr *)&client_addr,
+                             (unsigned int *)&client_addr_len);
   printf("Client connected\n");
 
   char buffer[1024];
@@ -63,6 +63,7 @@ int main() {
 
   char ok[] = "HTTP/1.1 200 OK\r\n\r\n";
   char not_found[] = "HTTP/1.1 404 Not Found\r\n\r\n";
+  char response[1024];
 
   if (strncmp(path, "/echo/", 6) == 0) {
     size_t content_length = strlen(path) - 6;
@@ -70,6 +71,11 @@ int main() {
     const char *format = "HTTP/1.1 200 OK\r\n"
                          "Content-Type: text/plain\r\n"
                          "Content-Length: %zu\r\n\r\n%s";
+
+    sprintf(response, format, content_length, content);
+    printf("response data : %s", response);
+
+    send(client_socket, response, sizeof(response), 0);
   } else if (strcmp(path, "/") == 0) {
     send(client_socket, ok, sizeof(ok), 0);
   } else {
