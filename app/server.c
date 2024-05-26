@@ -1,11 +1,14 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+void *http_handler(void *args);
 
 int main() {
   // Disable output buffering
@@ -13,6 +16,7 @@ int main() {
 
   int server_socket, client_addr_len;
   struct sockaddr_in client_addr;
+  pthread_t tid;
 
   server_socket = socket(AF_INET, SOCK_STREAM, 0);
   if (server_socket == -1) {
@@ -40,19 +44,32 @@ int main() {
     return 1;
   }
 
-  int connection_backlog = 5;
+  int connection_backlog = 10;
   if (listen(server_socket, connection_backlog) != 0) {
     printf("Listen failed: %s \n", strerror(errno));
     return 1;
   }
-
   printf("Waiting for a client to connect...\n");
-  client_addr_len = sizeof(client_addr);
 
-  int client_socket = accept(server_socket, (struct sockaddr *)&client_addr,
-                             (unsigned int *)&client_addr_len);
-  printf("Client connected\n");
+  while (1) {
+    client_addr_len = sizeof(client_addr);
+    intptr_t client_socket =
+        accept(server_socket, (struct sockaddr *)&client_addr,
+               (unsigned int *)&client_addr_len);
+    if (client_socket < 0) {
+      break;
+    }
+    pthread_create(&tid, NULL, http_handler, (void *)client_socket);
+    printf("Client connected\n");
+  }
 
+  close(server_socket);
+
+  return 0;
+}
+
+void *http_handler(void *args) {
+  intptr_t client_socket = (intptr_t)args;
   char buffer[1024];
 
   ssize_t bytes_read = read(client_socket, buffer, sizeof(buffer) - 1);
@@ -79,8 +96,6 @@ int main() {
     }
     header_line = strtok(NULL, "\r\n");
   }
-  printf("%s\n%s\n%s\n%s\n%s\n%s\n\r\n", method, path, request_line, host,
-         accept, user_agent);
 
   size_t content_length;
   char *content;
@@ -127,8 +142,4 @@ int main() {
     printf("404 not found\n");
     send(client_socket, not_found, sizeof(not_found), 0);
   }
-
-  close(server_socket);
-
-  return 0;
 }
