@@ -6,11 +6,19 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
+
+char *directory = NULL;
 
 void *http_handler(void *args);
 
-int main() {
+int main(int argc, char **argv) {
+
+  if (argc >= 2 &&
+      strncmp(argv[1], "--directory", strlen("--directory")) == 0) {
+    directory = argv[2];
+  }
   // Disable output buffering
   setbuf(stdout, NULL);
 
@@ -88,11 +96,11 @@ void *http_handler(void *args) {
   char *header_line = strtok(NULL, "\r\n");
   while (header_line != NULL && strlen(header_line) > 0) {
     if (strncmp(header_line, "Host: ", 6) == 0) {
-      host = header_line; // Skip "Host: "
+      host = header_line;
     } else if (strncmp(header_line, "Accept: ", 8) == 0) {
-      accept = header_line; // Skip "Accept: "
+      accept = header_line;
     } else if (strncmp(header_line, "User-Agent: ", 12) == 0) {
-      user_agent = header_line; // Skip "User-Agent: "
+      user_agent = header_line;
     }
     header_line = strtok(NULL, "\r\n");
   }
@@ -102,8 +110,43 @@ void *http_handler(void *args) {
   char *format;
 
   char ok[] = "HTTP/1.1 200 OK\r\n\r\n";
-  char not_found[] = "HTTP/1.1 404 Not Found\r\n\r\n";
+  char not_found[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
   char response[1024];
+
+  if (strncmp(path, "/files/", 7) == 0 && directory != NULL) {
+    FILE *file;
+    long file_size;
+    char *filename = path + 7;
+    char *full_path = malloc(strlen(directory) + strlen(filename) + 1);
+    printf("%s\n", filename);
+
+    strcpy(full_path, directory);
+    strcat(full_path, filename);
+
+    full_path[strlen(directory) + strlen(filename)] = '\0';
+
+    if ((file = fopen(full_path, "r"))) {
+      fseek(file, 0, SEEK_END);
+      file_size = ftell(file);
+      fseek(file, 0, SEEK_SET);
+
+      char *content = malloc(file_size + 1);
+      fread(content, file_size, 1, file);
+      fclose(file);
+
+      content[file_size] = '\0';
+      sprintf(response,
+              "HTTP/1.1 200 OK\r\nContent-Type: "
+              "application/octet-stream\r\nContent-Length: %ld\r\n\r\n%s",
+              file_size, content);
+      printf("response data: %s", response);
+      send(client_socket, response, strlen(response), 0);
+    } else {
+      puts("couldn't open the file");
+      strcpy(response, "HTTP/1.1 404 Not Found\r\n\r\n");
+      send(client_socket, response, strlen(response), 0);
+    }
+  }
 
   if (strncmp(path, "/echo/", 6) == 0) {
 
@@ -116,9 +159,10 @@ void *http_handler(void *args) {
     sprintf(response, format, content_length, content);
     printf("response data : \n%s", response);
 
-    send(client_socket, response, sizeof(response), 0);
+    send(client_socket, response, strlen(response), 0);
+  }
 
-  } else if (strncmp(path, "/user-agent", 11) == 0) {
+  if (strncmp(path, "/user-agent", 11) == 0) {
 
     content = user_agent + 12;
     content_length = strlen(content);
@@ -130,16 +174,18 @@ void *http_handler(void *args) {
     sprintf(response, format, content_length, content);
     printf("response data : \n%s", response);
 
-    send(client_socket, response, sizeof(response), 0);
-
-  } else if (strcmp(path, "/") == 0) {
+    send(client_socket, response, strlen(response), 0);
+  }
+  if (strcmp(path, "/") == 0) {
 
     printf("200 OK\n");
-    send(client_socket, ok, sizeof(ok), 0);
+    send(client_socket, ok, strlen(ok), 0);
 
   } else {
 
     printf("404 not found\n");
-    send(client_socket, not_found, sizeof(not_found), 0);
+    send(client_socket, not_found, strlen(not_found), 0);
   }
+
+  return NULL;
 }
