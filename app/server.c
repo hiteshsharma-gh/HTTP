@@ -55,18 +55,32 @@ int main() {
 
   char buffer[1024];
 
-  read(client_socket, buffer, sizeof(buffer));
+  ssize_t bytes_read = read(client_socket, buffer, sizeof(buffer) - 1);
+  buffer[bytes_read] = '\0';
   printf("request data: \n%s\r\n", buffer);
 
   char *method = strtok(buffer, " ");
   char *path = strtok(NULL, " ");
   char *request_line = strtok(NULL, "\r\n");
-  char *host = strtok(NULL, "\r\n");
-  char *accept = strtok(NULL, "\r\n");
-  char *user_agent = strtok(NULL, "\r\n");
-  printf("method: %s\n path: %s\n request_line: %s\n host: %s\n user-agent: "
-         "%s\n\r\n",
-         method, path, request_line, host, user_agent);
+
+  char *host = NULL;
+  char *accept = NULL;
+  char *user_agent = NULL;
+
+  // Parse the headers
+  char *header_line = strtok(NULL, "\r\n");
+  while (header_line != NULL && strlen(header_line) > 0) {
+    if (strncmp(header_line, "Host: ", 6) == 0) {
+      host = header_line; // Skip "Host: "
+    } else if (strncmp(header_line, "Accept: ", 8) == 0) {
+      accept = header_line; // Skip "Accept: "
+    } else if (strncmp(header_line, "User-Agent: ", 12) == 0) {
+      user_agent = header_line; // Skip "User-Agent: "
+    }
+    header_line = strtok(NULL, "\r\n");
+  }
+  printf("%s\n%s\n%s\n%s\n%s\n%s\n\r\n", method, path, request_line, host,
+         accept, user_agent);
 
   size_t content_length;
   char *content;
@@ -77,6 +91,7 @@ int main() {
   char response[1024];
 
   if (strncmp(path, "/echo/", 6) == 0) {
+
     content_length = strlen(path) - 6;
     content = path + 6;
     format = "HTTP/1.1 200 OK\r\n"
@@ -87,9 +102,12 @@ int main() {
     printf("response data : \n%s", response);
 
     send(client_socket, response, sizeof(response), 0);
+
   } else if (strncmp(path, "/user-agent", 11) == 0) {
-    content_length = strlen(user_agent) - 12;
+
     content = user_agent + 12;
+    content_length = strlen(content);
+
     format = "HTTP/1.1 200 OK\r\n"
              "Content-Type: text/plain\r\n"
              "Content-Length: %zu\r\n\r\n%s";
@@ -98,10 +116,14 @@ int main() {
     printf("response data : \n%s", response);
 
     send(client_socket, response, sizeof(response), 0);
+
   } else if (strcmp(path, "/") == 0) {
+
     printf("200 OK\n");
     send(client_socket, ok, sizeof(ok), 0);
+
   } else {
+
     printf("404 not found\n");
     send(client_socket, not_found, sizeof(not_found), 0);
   }
