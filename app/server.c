@@ -93,6 +93,7 @@ void *http_handler(void *args) {
   char *accept = NULL;
   char *user_agent = NULL;
   char *request_body = NULL;
+  char *accept_encoding = NULL;
 
   // Parse the headers
   char *header_line = strtok(NULL, "\r\n");
@@ -103,6 +104,8 @@ void *http_handler(void *args) {
       accept = header_line;
     } else if (strncmp(header_line, "User-Agent: ", 12) == 0) {
       user_agent = header_line;
+    } else if (strncmp(header_line, "Accept-Encoding: ", 17) == 0) {
+      accept_encoding = header_line;
     } else {
       request_body = header_line;
     }
@@ -179,9 +182,23 @@ void *http_handler(void *args) {
 
     content_length = strlen(path) - 6;
     content = path + 6;
-    format = "HTTP/1.1 200 OK\r\n"
-             "Content-Type: text/plain\r\n"
-             "Content-Length: %zu\r\n\r\n%s";
+    if (accept_encoding != NULL) {
+      if (strncmp(accept_encoding, "Accept-Encoding: gzip", 21) == 0) {
+        format = "HTTP/1.1 200 OK\r\n"
+                 "Content-Encoding: gzip\r\n"
+                 "Content-Type: text/plain\r\n"
+                 "Content-Length: %zu\r\n\r\n%s";
+      } else {
+        format = "HTTP/1.1 200 OK\r\n"
+                 "Content-Type: text/plain\r\n"
+                 "Content-Length: %zu\r\n\r\n%s";
+      }
+    } else {
+      format = "HTTP/1.1 200 OK\r\n"
+               "Content-Type: text/plain\r\n"
+               "Content-Length: %zu\r\n\r\n%s";
+    }
+    printf("format: %s\n", format);
 
     sprintf(response, format, content_length, content);
     printf("response data : \n%s", response);
