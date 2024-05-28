@@ -15,12 +15,13 @@ void *http_handler(void *args);
 
 int main(int argc, char **argv) {
 
+  // Disable output buffering
+  setbuf(stdout, NULL);
+
   if (argc >= 2 &&
       strncmp(argv[1], "--directory", strlen("--directory")) == 0) {
     directory = argv[2];
   }
-  // Disable output buffering
-  setbuf(stdout, NULL);
 
   int server_socket, client_addr_len;
   struct sockaddr_in client_addr;
@@ -91,6 +92,7 @@ void *http_handler(void *args) {
   char *host = NULL;
   char *accept = NULL;
   char *user_agent = NULL;
+  char *request_body = NULL;
 
   // Parse the headers
   char *header_line = strtok(NULL, "\r\n");
@@ -101,6 +103,8 @@ void *http_handler(void *args) {
       accept = header_line;
     } else if (strncmp(header_line, "User-Agent: ", 12) == 0) {
       user_agent = header_line;
+    } else {
+      request_body = header_line;
     }
     header_line = strtok(NULL, "\r\n");
   }
@@ -124,6 +128,28 @@ void *http_handler(void *args) {
     strcat(full_path, filename);
 
     full_path[strlen(directory) + strlen(filename)] = '\0';
+    if (strncmp(method, "POST", 4) == 0) {
+      if ((file = fopen(full_path, "w"))) {
+        fputs(request_body, file);
+        printf("%s\n\r", request_body);
+
+        fseek(file, 0, SEEK_END);
+        file_size = ftell(file);
+
+        fclose(file);
+        sprintf(response,
+                "HTTP/1.1 201 Created\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "Content-Length: %ld\r\n\r\n%s",
+                file_size, request_body);
+
+        printf("response data: %s\n", response);
+        send(client_socket, response, strlen(response), 0);
+      } else {
+        strcpy(response, "HTTP/1.1 404 Not Found\r\n\r\n");
+        send(client_socket, response, strlen(response), 0);
+      }
+    }
 
     if ((file = fopen(full_path, "r"))) {
       fseek(file, 0, SEEK_END);
@@ -136,8 +162,9 @@ void *http_handler(void *args) {
 
       content[file_size] = '\0';
       sprintf(response,
-              "HTTP/1.1 200 OK\r\nContent-Type: "
-              "application/octet-stream\r\nContent-Length: %ld\r\n\r\n%s",
+              "HTTP/1.1 200 OK\r\n"
+              "Content-Type: application/octet-stream\r\n"
+              "Content-Length: %ld\r\n\r\n%s",
               file_size, content);
       printf("response data: %s", response);
       send(client_socket, response, strlen(response), 0);
