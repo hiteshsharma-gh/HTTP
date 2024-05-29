@@ -182,8 +182,30 @@ void *http_handler(void *args) {
 
     content_length = strlen(path) - 6;
     content = path + 6;
+
     if (accept_encoding != NULL) {
-      if (strncmp(accept_encoding, "Accept-Encoding: gzip", 21) == 0) {
+      printf("accept encoding: %s\r\n", accept_encoding);
+
+      int gzip = 0;
+      char *encoding[sizeof(accept_encoding)];
+      int i = 0;
+      char *token = strtok(accept_encoding, " ");
+
+      while (token != NULL) {
+        encoding[i] = token;
+        printf("encoding[%d]: %s\n", i, encoding[i]);
+
+        if (strncmp(encoding[i], "gzip,", 5) == 0 ||
+            strncmp(encoding[i], "gzip", 4) == 0) {
+          gzip = 1;
+          break;
+        }
+
+        token = strtok(NULL, " ");
+        i++;
+      }
+
+      if (gzip) {
         format = "HTTP/1.1 200 OK\r\n"
                  "Content-Encoding: gzip\r\n"
                  "Content-Type: text/plain\r\n"
