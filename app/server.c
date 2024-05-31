@@ -8,14 +8,13 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+#include <zlib.h>
 
 char *directory = NULL;
 
 void *http_handler(void *args);
 
 int main(int argc, char **argv) {
-
-  // Disable output buffering
   setbuf(stdout, NULL);
 
   if (argc >= 2 &&
@@ -32,8 +31,7 @@ int main(int argc, char **argv) {
     printf("Socket creation failed: %s...\n", strerror(errno));
     return 1;
   }
-  // // Since the tester restarts your program quite often, setting REUSE_PORT
-  // // ensures that we don't run into 'Address already in use' errors
+
   int reuse = 1;
   if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &reuse,
                  sizeof(reuse)) < 0) {
@@ -69,19 +67,43 @@ int main(int argc, char **argv) {
       break;
     }
     pthread_create(&tid, NULL, http_handler, (void *)client_socket);
+    pthread_detach(tid);
     printf("Client connected\n");
   }
 
   close(server_socket);
-
   return 0;
+}
+
+int compressToGzip(const char *input, int inputSize, char *output,
+                   int outputSize) {
+  z_stream zs = {0};
+  zs.zalloc = Z_NULL;
+  zs.zfree = Z_NULL;
+  zs.opaque = Z_NULL;
+  zs.avail_in = (uInt)inputSize;
+  zs.next_in = (Bytef *)input;
+  zs.avail_out = (uInt)outputSize;
+  zs.next_out = (Bytef *)output;
+  deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8,
+               Z_DEFAULT_STRATEGY);
+  int ret = deflate(&zs, Z_FINISH);
+  deflateEnd(&zs);
+  if (ret != Z_STREAM_END) {
+    fprintf(stderr, "Compression failed\n");
+    return -1;
+  }
+  return zs.total_out;
 }
 
 void *http_handler(void *args) {
   intptr_t client_socket = (intptr_t)args;
   char buffer[1024];
-
   ssize_t bytes_read = read(client_socket, buffer, sizeof(buffer) - 1);
+  if (bytes_read <= 0) {
+    close(client_socket);
+    return NULL;
+  }
   buffer[bytes_read] = '\0';
   printf("request data: \n%s\r\n", buffer);
 
@@ -95,7 +117,6 @@ void *http_handler(void *args) {
   char *request_body = NULL;
   char *accept_encoding = NULL;
 
-  // Parse the headers
   char *header_line = strtok(NULL, "\r\n");
   while (header_line != NULL && strlen(header_line) > 0) {
     if (strncmp(header_line, "Host: ", 6) == 0) {
@@ -105,16 +126,12 @@ void *http_handler(void *args) {
     } else if (strncmp(header_line, "User-Agent: ", 12) == 0) {
       user_agent = header_line;
     } else if (strncmp(header_line, "Accept-Encoding: ", 17) == 0) {
-      accept_encoding = header_line;
+      accept_encoding = header_line + 17;
     } else {
       request_body = header_line;
     }
     header_line = strtok(NULL, "\r\n");
   }
-
-  size_t content_length;
-  char *content;
-  char *format;
 
   char ok[] = "HTTP/1.1 200 OK\r\n\r\n";
   char not_found[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
@@ -125,7 +142,6 @@ void *http_handler(void *args) {
     long file_size;
     char *filename = path + 7;
     char *full_path = malloc(strlen(directory) + strlen(filename) + 1);
-    printf("%s\n", filename);
 
     strcpy(full_path, directory);
     strcat(full_path, filename);
@@ -134,24 +150,23 @@ void *http_handler(void *args) {
     if (strncmp(method, "POST", 4) == 0) {
       if ((file = fopen(full_path, "w"))) {
         fputs(request_body, file);
-        printf("%s\n\r", request_body);
-
         fseek(file, 0, SEEK_END);
         file_size = ftell(file);
-
         fclose(file);
         sprintf(response,
                 "HTTP/1.1 201 Created\r\n"
                 "Content-Type: application/octet-stream\r\n"
                 "Content-Length: %ld\r\n\r\n%s",
                 file_size, request_body);
-
         printf("response data: %s\n", response);
         send(client_socket, response, strlen(response), 0);
       } else {
         strcpy(response, "HTTP/1.1 404 Not Found\r\n\r\n");
         send(client_socket, response, strlen(response), 0);
       }
+      free(full_path);
+      close(client_socket);
+      return NULL;
     }
 
     if ((file = fopen(full_path, "r"))) {
@@ -171,87 +186,85 @@ void *http_handler(void *args) {
               file_size, content);
       printf("response data: %s", response);
       send(client_socket, response, strlen(response), 0);
+      free(content);
     } else {
       puts("couldn't open the file");
       strcpy(response, "HTTP/1.1 404 Not Found\r\n\r\n");
       send(client_socket, response, strlen(response), 0);
     }
+    free(full_path);
+    close(client_socket);
+    return NULL;
   }
 
   if (strncmp(path, "/echo/", 6) == 0) {
-
-    content_length = strlen(path) - 6;
-    content = path + 6;
+    char *content = path + 6;
+    size_t content_length = strlen(content);
+    int gzip = 0;
 
     if (accept_encoding != NULL) {
-      printf("accept encoding: %s\r\n", accept_encoding);
-
-      int gzip = 0;
-      char *encoding[sizeof(accept_encoding)];
-      int i = 0;
-      char *token = strtok(accept_encoding, " ");
-
+      char *token = strtok(accept_encoding, ", ");
       while (token != NULL) {
-        encoding[i] = token;
-        printf("encoding[%d]: %s\n", i, encoding[i]);
-
-        if (strncmp(encoding[i], "gzip,", 5) == 0 ||
-            strncmp(encoding[i], "gzip", 4) == 0) {
+        if (strcmp(token, "gzip") == 0) {
           gzip = 1;
           break;
         }
-
-        token = strtok(NULL, " ");
-        i++;
+        token = strtok(NULL, ", ");
       }
+    }
 
-      if (gzip) {
-        format = "HTTP/1.1 200 OK\r\n"
-                 "Content-Encoding: gzip\r\n"
-                 "Content-Type: text/plain\r\n"
-                 "Content-Length: %zu\r\n\r\n%s";
+    if (gzip) {
+      char compressed[1024];
+      content_length = compressToGzip(content, content_length, compressed,
+                                      sizeof(compressed));
+      if (content_length > 0) {
+        sprintf(response,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Encoding: gzip\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: %zu\r\n\r\n",
+                content_length);
+        printf("response data: %s\n", response);
+        printf("compressed data: %s\n", compressed);
+        send(client_socket, response, strlen(response), 0);
+        send(client_socket, compressed, content_length, 0);
       } else {
-        format = "HTTP/1.1 200 OK\r\n"
-                 "Content-Type: text/plain\r\n"
-                 "Content-Length: %zu\r\n\r\n%s";
+        strcpy(response, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
+        send(client_socket, response, strlen(response), 0);
       }
     } else {
-      format = "HTTP/1.1 200 OK\r\n"
-               "Content-Type: text/plain\r\n"
-               "Content-Length: %zu\r\n\r\n%s";
+      sprintf(response,
+              "HTTP/1.1 200 OK\r\n"
+              "Content-Type: text/plain\r\n"
+              "Content-Length: %zu\r\n\r\n%s",
+              content_length, content);
+      send(client_socket, response, strlen(response), 0);
     }
-    printf("format: %s\n", format);
-
-    sprintf(response, format, content_length, content);
-    printf("response data : \n%s", response);
-
-    send(client_socket, response, strlen(response), 0);
+    close(client_socket);
+    return NULL;
   }
 
   if (strncmp(path, "/user-agent", 11) == 0) {
-
-    content = user_agent + 12;
-    content_length = strlen(content);
-
-    format = "HTTP/1.1 200 OK\r\n"
-             "Content-Type: text/plain\r\n"
-             "Content-Length: %zu\r\n\r\n%s";
-
-    sprintf(response, format, content_length, content);
-    printf("response data : \n%s", response);
-
+    char *content = user_agent + 12;
+    size_t content_length = strlen(content);
+    sprintf(response,
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: %zu\r\n\r\n%s",
+            content_length, content);
     send(client_socket, response, strlen(response), 0);
+    close(client_socket);
+    return NULL;
   }
-  if (strcmp(path, "/") == 0) {
 
+  if (strcmp(path, "/") == 0) {
     printf("200 OK\n");
     send(client_socket, ok, strlen(ok), 0);
-
   } else {
-
     printf("404 not found\n");
     send(client_socket, not_found, strlen(not_found), 0);
   }
 
+  close(client_socket);
   return NULL;
 }
